@@ -529,7 +529,7 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
     view.append(h("div", { class: "admin-head" }, h("h1", {}, "Admin ", h("span", { class: "badge", text: "Working copy" }))),
       h("p", { class: "note", style: "margin:0 0 18px" }, "You're editing a working copy saved in this browser. Customers see the site only after you publish: tick Published on a product, then Download products.json and ask Claude to push it."));
     const status = h("div", { hidden: true });
-    const fillStatus = h("div", { class: "muted small", text: "Use the Send to my store bookmark on a product page to fill this form, or type the details." });
+    const fillStatus = h("div", { class: "muted small", id: "fillStatus", text: "Use the Send to my store bookmark on a product page to fill this form, or type the details." });
     const preview = h("div", { class: "uploads" });
     const tplSet = h("fieldset", { class: "tpls" }, h("legend", { text: "Template" }), TEMPLATES.map(([v, n, d], i) =>
       h("label", { class: "tpl" }, h("input", { type: "radio", name: "tpl", value: v, checked: i === 0, id: "tpl-" + v }), h("span", {}, h("b", { text: n }), h("small", { text: d })))));
@@ -810,7 +810,25 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
     applySource();
     renderCart();
     // Don't wipe an open editor's unsaved fields on every change.
-    if (!location.hash.startsWith("#edit-") || !document.getElementById("e-title")) route();
+    if (location.hash.startsWith("#edit-") && document.getElementById("e-title")) return;
+    // Keep whatever is in the build form (typed, or filled by the bookmark) when Admin redraws.
+    const form = location.hash === "#admin" && document.getElementById("buildForm");
+    const kept = form ? [...form.querySelectorAll("input[id], textarea[id], select[id]")]
+      .filter((el) => el.type !== "file").map((el) => [el.id, el.type === "radio" ? el.checked : el.value]) : null;
+    const status = form ? form.querySelector("#fillStatus") : null;
+    const keptStatus = status ? [status.textContent, status.className, status.style.color] : null;
+    route();
+    if (kept && !S.prefill) {
+      for (const [id, v] of kept) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        if (el.type === "radio") el.checked = v; else el.value = v;
+      }
+      const imgs = document.getElementById("srcImages");
+      if (imgs) imgs.dispatchEvent(new Event("input"));
+      const st = document.getElementById("fillStatus");
+      if (st && keptStatus) { [st.textContent, st.className] = keptStatus; st.style.color = keptStatus[2]; }
+    }
   }
 
   /* ---------- boot ---------- */
