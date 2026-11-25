@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Product Store (Draft)</title>
+<title>Product Store</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600&display=swap">
 <style>
@@ -187,8 +187,7 @@ td .tile span { font-size: .9rem; }
   <a class="brand" href="#shop" id="brand">Product Store</a>
   <nav class="nav" id="nav">
     <a href="#shop" data-route="shop">Shop</a>
-    <a href="#admin" data-route="admin">Admin</a>
-    <a href="#orders" data-route="orders">Orders</a>
+    <a href="#admin" data-route="admin" hidden>Admin</a>
   </nav>
   <button class="cart-btn" id="cartBtn" type="button">Cart <b id="cartCount">0</b></button>
 </div></header>
@@ -205,8 +204,8 @@ td .tile span { font-size: .9rem; }
   <div class="dbody" id="cartBody"></div>
   <div class="dfoot">
     <div class="total"><span>Subtotal</span><b id="cartTotal">$0.00</b></div>
-    <button class="btn primary wide" id="checkoutBtn" type="button">Checkout</button>
-    <p class="muted small" style="margin:0">Demo checkout: the order is recorded, no payment is taken.</p>
+    <button class="btn primary wide" id="checkoutBtn" type="button" disabled>Checkout opens soon</button>
+    <p class="muted small" style="margin:0">Online ordering isn't open yet. Your cart is saved on this device.</p>
   </div>
 </aside>
 <div class="toast" id="toast" hidden></div>
@@ -276,6 +275,7 @@ td .tile span { font-size: .9rem; }
       catch { toast("The bookmark's data couldn't be read. Try it again on the product page."); }
       history.replaceState(null, "", "#admin");
     }
+    if (/^#(admin|edit-)/.test(location.hash)) enterAdmin();
     const hsh = location.hash.slice(1) || "shop";
     document.querySelectorAll("#nav a").forEach((a) => a.toggleAttribute("aria-current", false));
     const navKey = hsh.startsWith("p-") ? "shop" : hsh.startsWith("edit-") ? "admin" : hsh;
@@ -284,7 +284,6 @@ td .tile span { font-size: .9rem; }
     view.replaceChildren();
     document.title = "Product Store";
     if (hsh === "admin") return S.canEdit ? renderAdmin(view) : renderNoAccess(view);
-    if (hsh === "orders") return S.canEdit ? renderOrders(view) : renderNoAccess(view);
     if (hsh.startsWith("edit-")) return S.canEdit ? renderEditor(view, hsh.slice(5)) : renderNoAccess(view);
     if (hsh.startsWith("p-")) return renderProduct(view, hsh.slice(2));
     renderShop(view);
@@ -389,7 +388,7 @@ td .tile span { font-size: .9rem; }
         h("button", { class: "btn small", type: "button", text: "Add", onclick: () => addToCart(p.id) }))));
     }
     $("#cartTotal").textContent = money(lines.reduce((s, l) => s + l.p.price_cents * l.qty, 0));
-    $("#checkoutBtn").disabled = !lines.length;
+    $("#checkoutBtn").disabled = true;   // no checkout on the static site yet
     if (!cart.length) store.set("reserveUntil", 0);
   }
   function openCart() { const d = $("#drawer"); d.hidden = false; $("#backdrop").hidden = false; requestAnimationFrame(() => requestAnimationFrame(() => d.classList.add("open"))); }
@@ -488,6 +487,17 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
     return "javascript:" + encodeURIComponent(code);
   }
 
+  function publishToSite() {
+    const products = S.localProducts.filter((p) => p.published).map(({ published, ...p }) => p);
+    if (!products.length) return toast("Publish at least one product first (tick Published in its editor).");
+    const file = { format: "product-store-site", version: 1, updated_at: new Date().toISOString(), products };
+    const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
+    const a = h("a", { href: URL.createObjectURL(blob), download: "products.json" });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast(`Downloaded products.json with ${products.length} product${products.length === 1 ? "" : "s"}. Ask Claude to push it.`);
+  }
+
   function exportDrafts() {
     const products = Object.entries(S.db.dump().products || {}).map(([id, d]) => ({ id, ...d }));
     const file = { format: "product-store-drafts", version: 1, exported_at: new Date().toISOString(), products };
@@ -516,8 +526,8 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
   }
 
   function renderAdmin(view) {
-    view.append(h("div", { class: "admin-head" }, h("h1", {}, "Admin ", h("span", { class: "badge", text: "Draft mode" }))),
-      h("p", { class: "note", style: "margin:0 0 18px" }, "This draft version saves products in this browser only. Export them now and then as a backup, and import the file into the server version when you go live."));
+    view.append(h("div", { class: "admin-head" }, h("h1", {}, "Admin ", h("span", { class: "badge", text: "Working copy" }))),
+      h("p", { class: "note", style: "margin:0 0 18px" }, "You're editing a working copy saved in this browser. Customers see the site only after you publish: tick Published on a product, then Download products.json and ask Claude to push it."));
     const status = h("div", { hidden: true });
     const fillStatus = h("div", { class: "muted small", text: "Use the Send to my store bookmark on a product page to fill this form, or type the details." });
     const preview = h("div", { class: "uploads" });
@@ -587,9 +597,15 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
 
     const fileIn = h("input", { type: "file", accept: "application/json,.json", hidden: true, id: "importFile",
       onchange: async () => { if (fileIn.files[0]) await importDrafts(fileIn.files[0]); fileIn.value = ""; } });
+    const livePublished = S.localProducts.filter((p) => p.published).length;
+    const publishPanel = h("section", { class: "panel" },
+      h("h2", { text: "Publish to the site" }),
+      h("p", { class: "muted small", style: "margin:0", text: `Customers only see what's in products.json on GitHub. This downloads a new products.json with your ${livePublished} published product${livePublished === 1 ? "" : "s"}. Then ask Claude to push it from your Downloads folder, and the site updates in about a minute.` }),
+      h("div", {}, h("button", { type: "button", class: "btn primary small", text: "Download products.json", onclick: publishToSite })),
+      h("p", { class: "muted small", style: "margin:0", text: `On the site now: ${S.siteProducts.length} product${S.siteProducts.length === 1 ? "" : "s"}.` }));
     const backup = h("section", { class: "panel" },
-      h("h2", { text: "Back up and move to the server" }),
-      h("p", { class: "muted small", style: "margin:0", text: "Export downloads every product as one file. Import loads a file back in here, or use Import products in the server version's admin when you go live." }),
+      h("h2", { text: "Back up your working copy" }),
+      h("p", { class: "muted small", style: "margin:0", text: "Your edits, drafts included, are saved in this browser only. Export downloads them all as one file; Import loads such a file here or in another browser." }),
       h("div", { class: "row", style: "align-items:center" }, fileIn,
         h("button", { type: "button", class: "btn small", style: "flex:0 0 auto", text: "Export products", onclick: exportDrafts }),
         h("button", { type: "button", class: "btn small", style: "flex:0 0 auto", text: "Import products", onclick: () => fileIn.click() })));
@@ -599,13 +615,14 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
       h("thead", {}, h("tr", {}, ["", "Product", "Price", "Template", "Status", ""].map((t) => h("th", { text: t })))),
       h("tbody", {}, list.map((p) => h("tr", {}, h("td", {}, tile(p)), h("td", {}, h("a", { href: "#edit-" + p.id, text: p.title })),
         h("td", { text: money(p.price_cents) }), h("td", { text: p.template }),
-        h("td", {}, h("span", { class: "pill" + (p.published ? " on" : ""), text: p.published ? "In shop" : "Draft" })),
+        h("td", {}, h("span", { class: "pill" + (p.published ? " on" : ""), text: p.published ? "Published" : "Draft" })),
         h("td", { style: "white-space:nowrap" }, h("button", { type: "button", class: "linkbtn", text: p.published ? "Unpublish" : "Publish", onclick: async () => {
           try { await S.db.collection("products").doc(p.id).update({ published: !p.published }); toast(p.published ? "Unpublished" : "Published"); } catch (e) { toast("Couldn't change it: " + (e.message || e.code)); }
         } }))))))) : h("p", { class: "muted", style: "margin:0", text: "No products yet. Build your first page above." });
     view.append(h("div", { class: "cols" },
       h("div", { class: "stack" }, form, h("section", { class: "panel" }, h("h2", { text: `Products (${list.length})` }), table)),
-      h("aside", { class: "stack" }, bookmark, backup)));
+      h("aside", { class: "stack" }, publishPanel, bookmark, backup,
+        h("button", { type: "button", class: "btn small", text: "Leave admin (see the shop as customers do)", onclick: leaveAdmin }))));
   }
 
   /* ---------- admin: editor ---------- */
@@ -701,7 +718,7 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
             })())),
         h("aside", { class: "stack" },
           h("section", { class: "panel" },
-            h("label", { class: "check" }, pubBox, "Published (customers can see it)"),
+            h("label", { class: "check" }, pubBox, "Published (goes on the site next time you publish)"),
             h("button", { type: "button", class: "btn primary wide", id: "saveBtn", text: "Save", onclick: save }),
             h("a", { class: "btn wide", href: "#p-" + p.id, text: "Preview page" })),
           h("section", { class: "panel" }, h("h2", { text: "Page layout" }), h("p", { class: "muted small", style: "margin:0", text: "Reorder sections; untick to hide one." }), secList.el),
@@ -764,16 +781,58 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
     };
   }
 
-  /* ---------- boot ---------- */
-  S.db = localDb(); S.sample = null; S.assets = null; S.canEdit = true;
-  S.user = { id: async () => "this-browser" };
-  renderCart();
-  S.db.collection("products").onSnapshot((snap) => {
-    S.products = snap.docs.map((d) => normalize(d.id, d.data() || {}));
-    S.loaded = true; S.loadError = "";
+  /* ---------- data sources ----------
+     Customers see products.json, the file published in the repo.
+     The admin edits a working copy saved in this browser, then publishes it as a new products.json. */
+  function applySource() {
+    S.canEdit = S.adminMode;
+    S.products = S.adminMode ? S.localProducts : S.siteProducts;
+    S.loaded = S.siteLoaded && (!S.adminMode || S.localLoaded);
+    document.querySelectorAll('#nav a[data-route="admin"]').forEach((a) => (a.hidden = !S.adminMode));
+  }
+  function enterAdmin() {
+    if (S.adminMode) return;
+    S.adminMode = true; store.set("adminMode", true);
+    applySource(); maybeSeed();
+  }
+  function leaveAdmin() {
+    S.adminMode = false; store.set("adminMode", false);
+    applySource(); location.hash = "#shop"; route();
+  }
+  // The first time you open Admin in a browser, start the working copy from what's on the site.
+  function maybeSeed() {
+    if (!S.adminMode || !S.siteLoaded || !S.localLoaded || S.localProducts.length || !S.siteProducts.length || store.get("seededFromSite", false)) return;
+    store.set("seededFromSite", true);
+    S.siteProducts.forEach((p) => { const { id, ...rest } = p; S.db.collection("products").doc(id).set(rest); });
+    toast(`Loaded ${S.siteProducts.length} product${S.siteProducts.length === 1 ? "" : "s"} from the site into your working copy`);
+  }
+  function refresh() {
+    applySource();
     renderCart();
     // Don't wipe an open editor's unsaved fields on every change.
     if (!location.hash.startsWith("#edit-") || !document.getElementById("e-title")) route();
+  }
+
+  /* ---------- boot ---------- */
+  S.db = localDb(); S.sample = null; S.assets = null;
+  S.user = { id: async () => "this-browser" };
+  S.adminMode = store.get("adminMode", false) === true;
+  S.localProducts = []; S.siteProducts = []; S.siteLoaded = false; S.localLoaded = false;
+  applySource();
+  renderCart();
+  fetch("products.json", { cache: "no-cache" })
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    .then((d) => {
+      const list = Array.isArray(d) ? d : d && d.products;
+      S.siteProducts = (Array.isArray(list) ? list : []).filter((p) => p && p.title)
+        .map((p, i) => normalize(typeof p.id === "string" && /^[A-Za-z0-9_-]{1,60}$/.test(p.id) ? p.id : "site" + i, { ...p, published: true }));
+      S.siteLoaded = true;
+      maybeSeed(); refresh();
+    });
+  S.db.collection("products").onSnapshot((snap) => {
+    S.localProducts = snap.docs.map((d) => normalize(d.id, d.data() || {}));
+    S.localLoaded = true;
+    maybeSeed(); refresh();
   });
 })();
 </script>

@@ -1,6 +1,8 @@
-# Product Store (draft)
+# Product Store
 
-A draft version of the store that runs entirely in the browser, hosted on GitHub Pages.
-Products are saved in the browser you use; export them from Admin as a backup.
+The live store page, hosted on GitHub Pages: https://angalie.github.io/product-store-draft/
 
-This page is copied from `docs/index.html` in the private `product-store` repo. Edit it there, then copy it here.
+- `index.html` is the store (shop and admin at `#admin`).
+- `products.json` holds the published products customers see.
+
+The source lives in the private `product-store` repo; edit there and copy changes here.
