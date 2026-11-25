@@ -275,7 +275,7 @@ td .tile span { font-size: .9rem; }
       catch { toast("The bookmark's data couldn't be read. Try it again on the product page."); }
       history.replaceState(null, "", "#admin");
     }
-    if (/^#(admin|edit-)/.test(location.hash)) enterAdmin();
+    if (/^#(admin|edit-)/.test(location.hash)) enterAdmin(); else S.prefill = null;
     const hsh = location.hash.slice(1) || "shop";
     document.querySelectorAll("#nav a").forEach((a) => a.toggleAttribute("aria-current", false));
     const navKey = hsh.startsWith("p-") ? "shop" : hsh.startsWith("edit-") ? "admin" : hsh;
@@ -473,6 +473,7 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
   }
 
   function bookmarkletHref() {
+    // A fresh query string each click, so the browser never opens an old cached copy of the store.
     const target = location.origin + location.pathname;
     const code = `(()=>{const q=s=>document.querySelector(s),m=k=>(q('meta[property="'+k+'"],meta[name="'+k+'"]')||{}).content||'';let ld=null;` +
       `document.querySelectorAll('script[type="application/ld+json"]').forEach(s=>{try{const d=JSON.parse(s.textContent);[].concat(d['@graph']||d).forEach(x=>{if(x&&[].concat(x['@type']).some(t=>/Product/.test(t)))ld=ld||x})}catch(e){}});` +
@@ -483,7 +484,7 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
       `details:[(ld&&ld.description)||m('og:description')||m('description'),...['#feature-bullets','#productDescription','[class*="specification" i]','[data-product-details-description-text-content]','[class*="product__description" i]','[class*="product-description" i]'].map(s=>(q(s)||{}).innerText)]` +
       `.map(x=>(x||'').replace(/[ \\t]+/g,' ').replace(/\\n\\s*\\n+/g,'\\n').trim().slice(0,2500)).filter(x=>x&&!/aliexpress\\.com|amazon\\.com|etsy\\.com/i.test(x)).filter((x,i,a)=>a.indexOf(x)===i).join('\\n\\n').slice(0,6000),` +
       `images:[...new Set([...(ld?[].concat(ld.image||[]).map(i=>typeof i=='string'?i:(i&&i.url)):[]),m('og:image'),...[...document.images].filter(i=>i.naturalWidth>=350&&i.naturalHeight>=350).map(i=>i.currentSrc||i.src)])].filter(u=>/^https:/.test(u||'')).slice(0,8)};` +
-      `window.open(${JSON.stringify(target)}+'#prefill='+encodeURIComponent(JSON.stringify(d)),'_blank')})()`;
+      `window.open(${JSON.stringify(target)}+'?t='+Date.now()+'#prefill='+encodeURIComponent(JSON.stringify(d)),'_blank')})()`;
     return "javascript:" + encodeURIComponent(code);
   }
 
@@ -557,8 +558,9 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
     imgsIn.addEventListener("input", showPreview);
 
     // Data from the "Send to my store" bookmark
+    // Kept until the draft is created or you leave Admin, so redraws can't lose it.
     if (S.prefill) {
-      const d = S.prefill; S.prefill = null;
+      const d = S.prefill;
       if (typeof d.url === "string" && /^https?:\/\//.test(d.url)) form.querySelector("#srcUrl").value = d.url.slice(0, 1000);
       form.querySelector("#srcTitle").value = String(d.title || "").slice(0, 200);
       form.querySelector("#srcPrice").value = priceText(d.price);
@@ -585,7 +587,7 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
         seo_title: page.seo_title, seo_description: page.seo_description,
         source_url: /^https?:\/\//.test(src.url) ? src.url.slice(0, 500) : "", published: false, created_at: new Date().toISOString(),
       };
-      try { await S.db.collection("products").doc(id).set(doc); S.flash = "Draft created. Edit it, then publish it to show it in the shop."; location.hash = "#edit-" + id; }
+      try { S.prefill = null; await S.db.collection("products").doc(id).set(doc); S.flash = "Draft created. Edit it, then publish it to show it in the shop."; location.hash = "#edit-" + id; }
       catch (err) { toast("Couldn't save the draft: " + (err.message || err.code)); }
     };
 
@@ -761,7 +763,8 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
     };
     const clone = (v) => JSON.parse(JSON.stringify(v));
     const snap = (col) => ({ docs: Object.entries(data[col] || {}).map(([id, d]) => ({ id, exists: true, data: () => d })) });
-    const emit = (col) => (listeners[col] || []).forEach((f) => f(snap(col)));
+    // Notify listeners after the current step finishes, so a save never redraws the page mid-draw.
+    const emit = (col) => setTimeout(() => (listeners[col] || []).forEach((f) => f(snap(col))), 0);
     window.addEventListener("storage", (e) => { if (e.key === KEY) { data = load(); Object.keys(listeners).forEach(emit); } });
     return {
       dump: () => clone(data),
@@ -818,7 +821,7 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
     const status = form ? form.querySelector("#fillStatus") : null;
     const keptStatus = status ? [status.textContent, status.className, status.style.color] : null;
     route();
-    if (kept && !S.prefill) {
+    if (kept) {
       for (const [id, v] of kept) {
         const el = document.getElementById(id);
         if (!el) continue;
