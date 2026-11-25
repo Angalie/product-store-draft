@@ -173,6 +173,23 @@ td .tile span { font-size: .9rem; }
 .writing { display: flex; gap: 10px; align-items: center; color: var(--muted); }
 .spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: sp .8s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
+.pv-panel { margin-top: 20px; }
+.pv-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; flex-wrap: wrap; }
+.pv-devices { display: flex; gap: 6px; }
+.pv-devices .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pv-row { display: flex; gap: 20px; flex-wrap: wrap; align-items: start; }
+.pv-mini { display: grid; gap: 8px; min-width: 0; } .pv-mini.grow { flex: 1 1 260px; }
+.pv-card { width: 220px; max-width: 100%; }
+.pv-label { font-family: var(--body); font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.pv-search { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 3px; max-width: 600px; min-width: 0; }
+.pv-url { font-size: .8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-stitle { color: var(--accent); font-size: 1.1rem; }
+.pv-sdesc { font-size: .88rem; color: var(--muted); }
+.pv-frame { border: 1px dashed var(--line); border-radius: var(--r); padding: 24px; background: var(--bg); overflow: hidden; }
+.pv-frame.phone { max-width: 390px; margin: 0 auto; padding: 16px; }
+.pv-frame .media { position: static; }
+.pv-frame.phone .product { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.pv-frame.phone .info h1 { font-size: 1.5rem; }
 .confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 @media (max-width: 820px) {
   .product, .cols { grid-template-columns: minmax(0, 1fr); gap: 22px; }
@@ -327,6 +344,14 @@ td .tile span { font-size: .9rem; }
     if (!p || (!p.published && !S.canEdit)) return view.append(h("div", { class: "empty" }, h("h2", { text: "Product not found" }), h("a", { class: "btn", href: "#shop", text: "Back to the shop" })));
     document.title = p.seo_title || p.title;
     if (!p.published) view.append(h("div", { class: "note preview-flag" }, "Preview: this product is a draft and customers can't see it. ", h("a", { href: "#edit-" + p.id, text: "Back to the editor" })));
+    view.append(productArticle(p));
+    const more = published().filter((o) => o.id !== p.id).slice(0, 4);
+    if (more.length) view.append(h("section", { style: "margin-top:56px;display:grid;gap:16px" }, h("h2", { text: "More products" }), h("div", { class: "grid" }, more.map(card))));
+    tick();
+  }
+
+  // The product page itself, shared by the shop and the editor's live preview.
+  function productArticle(p) {
     const sections = p.sections.length ? p.sections : ALL_SECTIONS;
     const media = h("div", { class: "media" });
     if (sections.includes("gallery")) {
@@ -351,10 +376,7 @@ td .tile span { font-size: .9rem; }
       if (s === "description" && p.description) info.append(h("section", { class: "sec" }, h("h2", { text: "About this product" }), p.description.split(/\n\s*\n/).map((t) => h("p", { text: t.trim() }))));
       if (s === "faq" && p.faqs.length) info.append(h("section", { class: "sec" }, h("h2", { text: "Questions" }), p.faqs.map((f) => h("details", {}, h("summary", { text: f.q }), h("p", { text: f.a })))));
     }
-    view.append(h("article", { class: "product tpl-" + p.template }, media, info));
-    const more = published().filter((o) => o.id !== p.id).slice(0, 4);
-    if (more.length) view.append(h("section", { style: "margin-top:56px;display:grid;gap:16px" }, h("h2", { text: "More products" }), h("div", { class: "grid" }, more.map(card))));
-    tick();
+    return h("article", { class: "product tpl-" + p.template }, media, info);
   }
 
   /* ---------- cart ---------- */
@@ -678,10 +700,11 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
       h("button", { type: "button", class: "btn small", text: "Cancel", onclick: showDelete })) }));
     showDelete();
 
-    const save = async () => {
+    // Reads the editor's current fields (saved or not) into a product.
+    const collect = () => {
       const v = (k) => $("#e-" + k).value;
       const lines = (s) => s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      const update = {
+      return {
         title: v("title").trim().slice(0, 200) || p.title, tagline: v("tagline").slice(0, 300),
         price_cents: toCents(v("price")) ?? p.price_cents, compare_at_cents: toCents(v("compare")) || 0,
         countdown_minutes: Math.min(1440, Math.max(0, parseInt(v("countdown"), 10) || 0)),
@@ -691,6 +714,9 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
         template: v("template"), language: v("language"), seo_title: v("seo_title").slice(0, 70), seo_description: v("seo_description").slice(0, 170),
         published: pubBox.checked,
       };
+    };
+    const save = async () => {
+      const update = collect();
       const btn = $("#saveBtn"); btn.disabled = true;
       try { await S.db.collection("products").doc(p.id).update(update); toast("Saved"); } catch (e) { toast("Couldn't save: " + (e.message || e.code)); }
       btn.disabled = false;
@@ -722,7 +748,8 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
           h("section", { class: "panel" },
             h("label", { class: "check" }, pubBox, "Published (goes on the site next time you publish)"),
             h("button", { type: "button", class: "btn primary wide", id: "saveBtn", text: "Save", onclick: save }),
-            h("a", { class: "btn wide", href: "#p-" + p.id, text: "Preview page" })),
+            h("button", { type: "button", class: "btn wide", text: "See live preview ↓", onclick: () => document.querySelector(".pv-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }) }),
+            h("a", { class: "btn wide", href: "#p-" + p.id, text: "Open full page" })),
           h("section", { class: "panel" }, h("h2", { text: "Page layout" }), h("p", { class: "muted small", style: "margin:0", text: "Reorder sections; untick to hide one." }), secList.el),
           h("section", { class: "panel" },
             h("label", { class: "f" }, "Template", h("select", { id: "e-template" }, TEMPLATES.map(([v, n]) => h("option", { value: v, selected: v === draft.template, text: n })))),
@@ -731,6 +758,46 @@ ${opts.notes ? "Owner notes: " + opts.notes : ""}
             field("Search title", "seo_title", { max: 70 }), field("Search description", "seo_description", { area: true, rows: "3", max: 170 })),
           draft.source_url.startsWith("https://") ? h("p", { class: "muted small", style: "margin:0" }, "Imported from ", h("a", { href: draft.source_url, target: "_blank", rel: "noopener noreferrer", text: "the source listing" })) : null,
           delArea)));
+
+    /* Live preview: redraws from the fields as you edit, before you save. */
+    let device = store.get("previewDevice", "desktop");
+    const frame = h("div", { class: "pv-frame", inert: true });
+    const cardSlot = h("div", { class: "pv-card" });
+    const searchSlot = h("div", { class: "pv-search" });
+    const devBtns = ["desktop", "phone"].map((d) => h("button", { type: "button", class: "btn small", "aria-pressed": String(device === d), text: d === "desktop" ? "Desktop" : "Phone",
+      onclick: () => { device = d; store.set("previewDevice", d); devBtns.forEach((b) => b.setAttribute("aria-pressed", String(b.textContent.toLowerCase() === d))); drawPreview(); } }));
+    function drawPreview() {
+      const live = normalize(p.id, { ...p, ...collect() });
+      frame.className = "pv-frame " + device;
+      frame.replaceChildren(productArticle(live));
+      cardSlot.replaceChildren(h("div", { class: "card" }, tile(live), h("div", { class: "body" }, h("h3", { text: live.title }), priceEl(live))));
+      const url = location.origin + location.pathname + "#p-" + live.id;
+      searchSlot.replaceChildren(
+        h("div", { class: "pv-url", text: url.replace(/^https?:\/\//, "") }),
+        h("div", { class: "pv-stitle", text: (live.seo_title || live.title).slice(0, 70) }),
+        h("div", { class: "pv-sdesc", text: (live.seo_description || live.description).replace(/\s+/g, " ").slice(0, 170) }));
+      tick();
+    }
+    let pvTimer;
+    const schedule = () => { clearTimeout(pvTimer); pvTimer = setTimeout(drawPreview, 150); };
+    // #view is reused by every page, so drop the previous editor's listeners first.
+    if (S.pvAbort) S.pvAbort.abort();
+    S.pvAbort = new AbortController();
+    const opt = { signal: S.pvAbort.signal };
+    view.addEventListener("input", schedule, opt);
+    view.addEventListener("change", schedule, opt);
+    view.addEventListener("click", (e) => { if (e.target.closest("button") && !e.target.closest(".pv-panel")) schedule(); }, opt);
+    view.addEventListener("drop", schedule, opt);
+    view.append(h("section", { class: "panel pv-panel" },
+      h("div", { class: "pv-head" },
+        h("div", {}, h("h2", { text: "Live preview" }), h("p", { class: "muted small", style: "margin:0", text: "How customers will see this product. It updates as you edit; remember to Save." })),
+        h("div", { class: "pv-devices", role: "group", "aria-label": "Preview size" }, devBtns)),
+      h("div", { class: "pv-row" },
+        h("div", { class: "pv-mini" }, h("h3", { class: "pv-label", text: "In the shop grid" }), cardSlot),
+        h("div", { class: "pv-mini grow" }, h("h3", { class: "pv-label", text: "In search results" }), searchSlot)),
+      h("h3", { class: "pv-label", text: "Product page" }),
+      frame));
+    drawPreview();
   }
 
   /* ---------- admin: orders ---------- */
